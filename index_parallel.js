@@ -60,36 +60,25 @@ const fetchProductVariants = async (country, locale, batchSize, cursor = null) =
         'Content-Type': 'application/json'
       }
     });
-
-    if (response.data.errors) {
-      console.error('GraphQL errors:', response.data.errors);
-      return null;
-    }
-
     return response.data.data.products;
   } catch (error) {
-    console.error('Error fetching product variants:', error);
-    return null;
+    console.error('Error fetching product variants:', error.response ? error.response.data : error.message);
+    throw error;
   }
 };
 
 const syncToAlgolia = async (records) => {
-  await algoliaIndex.saveObjects(records);
+  try {
+    await algoliaIndex.saveObjects(records);
+  } catch (error) {
+    console.error('Error syncing to Algolia:', error);
+    throw error;
+  }
 };
 
-const processAndSyncData = async (country, locale, batchSize) => {
-  let hasNextPage = true;
-  let cursor = null;
-  let totalUpdated = 0;
-
-  while (hasNextPage) {
+const processBatch = async (country, locale, batchSize, cursor) => {
+  try {
     const data = await fetchProductVariants(country, locale, batchSize, cursor);
-
-    if (!data) {
-      console.error('Failed to fetch data from Shopify.');
-      break;
-    }
-
     const records = data.edges.flatMap(({ node }) => {
       const translatedTitle = node.translations.find(translation => translation.key === 'title')?.value || node.title;
       return node.variants.edges.map(({ node: variant }) => ({
@@ -102,13 +91,49 @@ const processAndSyncData = async (country, locale, batchSize) => {
 
     if (records.length > 0) {
       await syncToAlgolia(records);
-      totalUpdated += records.length;
-      console.log(`Total updated so far: ${totalUpdated}`);
     }
 
-    hasNextPage = data.pageInfo.hasNextPage;
-    if (hasNextPage) {
-      cursor = data.edges[data.edges.length - 1].cursor;
+    const newCursor = data.edges.length > 0 ? data.edges[data.edges.length - 1].cursor : null;
+
+
+    return {
+      hasNextPage: data.pageInfo.hasNextPage,
+      cursor: newCursor,
+      recordCount: records.length
+    };
+  } catch (error) {
+    console.error(`Error processing batch with cursor ${cursor}:`, error);
+    throw error;
+  }
+};
+
+const processAndSyncData = async (country, locale, batchSize) => {
+  let hasNextPage = true;
+  let cursor = null;
+  let totalUpdated = 0;
+  const parallelBatches = 5; // Number of batches to process in parallel
+
+  while (hasNextPage) {
+    console.log(`Starting ${parallelBatches} New Batches With ${batchSize} Products`)
+    const batchPromises = [];
+    for (let i = 0; i < parallelBatches && hasNextPage; i++) {
+      batchPromises.push(processBatch(country, locale, batchSize, cursor));
+    }
+
+    try {
+      const batchResults = await Promise.all(batchPromises);
+
+      // Determine if any batch hasNextPage and update cursor accordingly
+      hasNextPage = false;
+      batchResults.forEach(result => {
+        if (result.hasNextPage) {
+          hasNextPage = true;
+          cursor = result.cursor;
+        }
+      });
+    } catch (error) {
+      console.error('Error in one of the batch processes:', error);
+      break; // Stop further processing if any batch fails
     }
   }
 
@@ -135,9 +160,8 @@ const main = async () => {
   }
 
   algoliaIndex = client.initIndex(indexName);
-
   const startTime = performance.now();
-  
+
   try {
     await processAndSyncData(country, locale, Math.min(batchSize, 250)); // Limiting batch size to 250 as this is maximum allowed in non bulk query
   } catch (error) {

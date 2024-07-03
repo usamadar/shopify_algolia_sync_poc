@@ -2,6 +2,7 @@
   "dependencies": {
     "algoliasearch": "^4.24.0",
     "axios": "^1.7.2",
-    "dotenv": "^16.4.5"
+    "dotenv": "^16.4.5",
+    "perf_hooks": "^0.0.1"
   }
 }
