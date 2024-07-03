@@ -1,3 +1,10 @@
+## Create a ".env" in the current folder with following properties
+
+SHOPIFY_STORE=your-shopify-store.myshopify.com
+SHOPIFY_ACCESS_TOKEN=your-shopify-access-token
+ALGOLIA_APP_ID=your-algolia-app-id
+ALGOLIA_ADMIN_API_KEY=your-algolia-admin-api-key
+
 ## Usage
 
 To run the script, use the following command:
